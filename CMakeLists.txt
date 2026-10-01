@@ -62,6 +62,7 @@ set(headers
 set(sources
     src/main.cpp
     src/stb.cpp
+    src/tiny_obj_loader.cpp
     src/image.cpp
     src/glslUtility.cpp
     src/pathtrace.cu

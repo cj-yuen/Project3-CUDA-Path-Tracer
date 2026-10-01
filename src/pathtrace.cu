@@ -19,9 +19,11 @@
 #include "utilities.h"
 #include "intersections.h"
 #include "interactions.h"
+#include <iostream>
 
 #define ERRORCHECK 0
 #define SORT_BY_MATERIAL 0  // toggle to make same material contiguous in mem. before shading (1 = sort, 0 = no sort)
+#define BVH_BBOX_CULLING 1  // 1 = cull w/mesh bbox, 0 = test every triangle
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -91,6 +93,9 @@ static ShadeableIntersection* dev_intersections = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 static int* dev_materialIds = NULL; // material sorting
+static Triangle* dev_triangles = NULL;
+static MeshInfo* dev_meshInfos = NULL;
+static int hst_num_meshes = 0;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -121,6 +126,44 @@ void pathtraceInit(Scene* scene)
     // TODO: initialize any extra device memeory you need
     cudaMalloc(&dev_materialIds, pixelcount * sizeof(int));
 
+    // flatten all meshes --> triangle array
+    int totalTris = 0;
+    for (const auto& m : scene->meshes) {
+        totalTris += (int)m.triangles.size();
+    }
+
+    hst_num_meshes = (int)scene->meshes.size();
+
+    if (totalTris > 0) {
+        std::vector<Triangle> flatTris;
+        std::vector<MeshInfo> meshInfos;
+        flatTris.reserve(totalTris);
+
+        int offset = 0;
+        for (const auto& m : scene->meshes){
+            MeshInfo info;
+            info.triStart = offset;
+            info.triCount = (int)m.triangles.size();
+            info.materialid = m.materialid;
+            info.bboxMin = m.bboxMin;
+            info.bboxMax = m.bboxMax;
+            meshInfos.push_back(info);
+
+            for (const auto& t : m.triangles) flatTris.push_back(t);
+            offset += (int)m.triangles.size();
+        }
+
+        cudaMalloc(&dev_triangles, totalTris * sizeof(Triangle));
+        cudaMemcpy(dev_triangles, flatTris.data(),
+            totalTris * sizeof(Triangle), cudaMemcpyHostToDevice);
+
+        cudaMalloc(&dev_meshInfos, hst_num_meshes * sizeof(MeshInfo));
+        cudaMemcpy(dev_meshInfos, meshInfos.data(),
+            hst_num_meshes * sizeof(MeshInfo), cudaMemcpyHostToDevice);
+
+        std::cout << "Uploaded " << totalTris << " triangles from " << hst_num_meshes << " mesh(es) to GPU." << std::endl;
+    }
+
     checkCUDAError("pathtraceInit");
 }
 
@@ -133,6 +176,16 @@ void pathtraceFree()
     cudaFree(dev_intersections);
     // TODO: clean up any extra device memory you created
     cudaFree(dev_materialIds);
+    
+    if (dev_triangles) {
+        cudaFree(dev_triangles);
+    }
+    if (dev_meshInfos) {
+        cudaFree(dev_meshInfos);
+    }
+    dev_triangles = NULL;
+    dev_meshInfos = NULL;
+    hst_num_meshes = 0;
 
     checkCUDAError("pathtraceFree");
 }
@@ -163,10 +216,24 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         float jitterX = u01(rng) - 0.5f;
         float jitterY = u01(rng) - 0.5f;
 
-        segment.ray.direction = glm::normalize(cam.view
-            - cam.right * cam.pixelLength.x * (((float)x + jitterX)- (float)cam.resolution.x * 0.5f)
-            - cam.up * cam.pixelLength.y * (((float)y + jitterY) - (float)cam.resolution.y * 0.5f)
-        );
+        // pinhole ray dir 
+        glm::vec3 pinholeDir = glm::normalize(cam.view 
+            - cam.right * cam.pixelLength.x * (((float)x + jitterX) - (float)cam.resolution.x * 0.5f) 
+            - cam.up * cam.pixelLength.y * (((float)y + jitterY) - (float)cam.resolution.y * 0.5f));
+
+        // pt on focal plane
+        float t = cam.focalDistance / glm::dot(pinholeDir, cam.view);
+        glm::vec3 focalPoint = cam.position + t * pinholeDir;
+
+        // sample pt on aperture lens disck (uniform area)
+        float r = cam.aperture * sqrtf(u01(rng));
+        float theta = TWO_PI * u01(rng);
+        glm::vec3 lensOffset = cam.right * (r * cosf(theta)) 
+            + cam.up * (r * sinf(theta));
+
+        // fire from lens
+        segment.ray.origin = cam.position + lensOffset;
+        segment.ray.direction = glm::normalize(focalPoint - segment.ray.origin);
 
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
@@ -184,6 +251,9 @@ __global__ void computeIntersections(
     PathSegment* pathSegments,
     Geom* geoms,
     int geoms_size,
+    Triangle* triangles,
+    MeshInfo* meshes,
+    int num_meshes,
     ShadeableIntersection* intersections)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -196,7 +266,8 @@ __global__ void computeIntersections(
         glm::vec3 intersect_point;
         glm::vec3 normal;
         float t_min = FLT_MAX;
-        int hit_geom_index = -1;
+        int hit_geom_index = -1;    // sphere/cube
+        int hit_mesh_index = -1;    // meshes
         bool outside = true;
 
         glm::vec3 tmp_intersect;
@@ -229,7 +300,32 @@ __global__ void computeIntersections(
             }
         }
 
-        if (hit_geom_index == -1)
+        // mesh loop (naive iterate all triangles per mesh)
+        for (int m = 0; m < num_meshes; m++) {
+            MeshInfo& mesh = meshes[m];
+
+#if BVH_BBOX_CULLING
+            // bbox rejection 
+            if (!bboxIntersectionTest(mesh.bboxMin, mesh.bboxMax, pathSegment.ray)) {
+                continue;
+            }
+#endif
+
+            for (int i = 0; i < mesh.triCount; i++){
+                const Triangle& tri = triangles[mesh.triStart + i];
+                t = triangleIntersectionTest(tri, pathSegment.ray,
+                    tmp_intersect, tmp_normal, outside);
+                if (t > 0.0f && t_min > t) {
+                    t_min = t;
+                    hit_mesh_index = m;
+                    hit_geom_index = -1;
+                    intersect_point = tmp_intersect;
+                    normal = tmp_normal;
+                }
+            }
+        }
+
+        if (hit_geom_index == -1 && hit_mesh_index == -1)
         {
             intersections[path_index].t = -1.0f;
         }
@@ -237,8 +333,14 @@ __global__ void computeIntersections(
         {
             // The ray hits something
             intersections[path_index].t = t_min;
-            intersections[path_index].materialId = geoms[hit_geom_index].materialid;
             intersections[path_index].surfaceNormal = normal;
+
+            if (hit_mesh_index >= 0) {
+                intersections[path_index].materialId = meshes[hit_mesh_index].materialid;
+            }
+            else {
+                intersections[path_index].materialId = geoms[hit_geom_index].materialid;
+            }
         }
     }
 }
@@ -432,12 +534,15 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         // tracing
         dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-        computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> (
+        computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
             depth,
             num_paths,
             dev_paths,
             dev_geoms,
             hst_scene->geoms.size(),
+            dev_triangles,
+            dev_meshInfos,
+            hst_num_meshes,
             dev_intersections
         );
         checkCUDAError("trace one bounce");

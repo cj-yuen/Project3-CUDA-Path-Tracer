@@ -2,6 +2,9 @@
 
 #include "utilities.h"
 
+#include <tiny_obj_loader.h>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include "json.hpp"
@@ -69,6 +72,115 @@ void Scene::loadFromJSON(const std::string& jsonName)
     for (const auto& p : objectsData)
     {
         const auto& type = p["TYPE"];
+
+        if (type == "mesh") {
+            tinyobj::attrib_t attrib;
+            std::vector<tinyobj::shape_t> shapes;
+            std::vector<tinyobj::material_t> objMaterials;
+            std::string warn, err;
+
+            std::string objPath = p["FILE"].get<std::string>();
+            bool ret = tinyobj::LoadObj(&attrib, &shapes, &objMaterials,
+                &warn, &err, objPath.c_str());
+
+            if (!ret) {
+                std::cerr << "Failed to load OBJ " << objPath << ": " << err << std::endl;
+                exit(-1);
+            }
+            
+            if (!warn.empty()) {
+                std::cout << "OBJ warning: " << warn << std::endl;
+            }
+
+            const auto& trans = p["TRANS"];
+            const auto& rotat = p["ROTAT"];
+            const auto& scale = p["SCALE"];
+
+            glm::mat4 xform = utilityCore::buildTransformationMatrix(
+                glm::vec3(trans[0], trans[1], trans[2]),
+                glm::vec3(rotat[0], rotat[1], rotat[2]),
+                glm::vec3(scale[0], scale[1], scale[2]));
+
+            // normal transform
+            glm::mat3 normalXform = glm::transpose(glm::inverse(glm::mat3(xform)));
+
+            TriangleMesh mesh;
+            mesh.materialid = MatNameToID[p["MATERIAL"]];
+
+            glm::vec3 bmin(FLT_MAX);
+            glm::vec3 bmax(-FLT_MAX);
+
+            for (const auto& shape : shapes) {
+                size_t index_offset = 0;
+                for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
+                    size_t fv = shape.mesh.num_face_vertices[f];
+                    
+                    if (fv != 3) { // triangles only
+                        index_offset += fv; continue; 
+                    } 
+
+                    Triangle tri{};
+                    for (size_t v = 0; v < 3; v++) {
+                        tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
+
+                        glm::vec3 pos(
+                            attrib.vertices[3 * idx.vertex_index + 0],
+                            attrib.vertices[3 * idx.vertex_index + 1],
+                            attrib.vertices[3 * idx.vertex_index + 2]);
+
+                        glm::vec3 pWorld = glm::vec3(xform * glm::vec4(pos, 1.0f));
+
+                        glm::vec3 nrm(0.0f);
+                        if (idx.normal_index >= 0) {
+                            nrm = glm::vec3(
+                                attrib.normals[3 * idx.normal_index + 0],
+                                attrib.normals[3 * idx.normal_index + 1],
+                                attrib.normals[3 * idx.normal_index + 2]);
+
+                            nrm = glm::normalize(normalXform * nrm);
+                        }
+
+                        if (v == 0) { 
+                            tri.v0 = pWorld; 
+                            tri.n0 = nrm; 
+                        }
+
+                        if (v == 1) { 
+                            tri.v1 = pWorld; 
+                            tri.n1 = nrm; 
+                        }
+
+                        if (v == 2) { 
+                            tri.v2 = pWorld; 
+                            tri.n2 = nrm; 
+                        }
+
+                        bmin = glm::min(bmin, pWorld);
+                        bmax = glm::max(bmax, pWorld);
+                    }
+
+                    // if OBJ has no normals --> use face normal
+                    if (glm::length(tri.n0) < 1e-6f &&
+                        glm::length(tri.n1) < 1e-6f &&
+                        glm::length(tri.n2) < 1e-6f) {
+
+                        glm::vec3 fn = glm::normalize(glm::cross(tri.v1 - tri.v0, tri.v2 - tri.v0));
+                        tri.n0 = tri.n1 = tri.n2 = fn;
+                    }
+
+                    mesh.triangles.push_back(tri);
+                    index_offset += fv;
+                }
+            }
+
+            mesh.bboxMin = bmin;
+            mesh.bboxMax = bmax;
+            meshes.push_back(mesh);
+
+            std::cout << "Loaded mesh " << objPath << " (" << mesh.triangles.size() << " triangles)" << std::endl;
+            continue;   // skip the sphere/cube branch
+        }
+
         Geom newGeom;
         if (type == "cube")
         {
@@ -107,6 +219,21 @@ void Scene::loadFromJSON(const std::string& jsonName)
     camera.position = glm::vec3(pos[0], pos[1], pos[2]);
     camera.lookAt = glm::vec3(lookat[0], lookat[1], lookat[2]);
     camera.up = glm::vec3(up[0], up[1], up[2]);
+
+    // depth of field (both optional)
+    if (cameraData.contains("APERTURE")) {
+        camera.aperture = cameraData["APERTURE"];
+    }
+    else {
+        camera.aperture = 0.0f; // pinhole (default)
+    }
+
+    if (cameraData.contains("FOCAL_DISTANCE")) {
+        camera.focalDistance = cameraData["FOCAL_DISTANCE"];
+    }
+    else {
+        camera.focalDistance = glm::length(camera.lookAt - camera.position);
+    }
 
     //calculate fov based on resolution
     float yscaled = tan(fovy * (PI / 180));
