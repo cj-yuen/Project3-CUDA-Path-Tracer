@@ -74,6 +74,7 @@ struct PathSegment
     glm::vec3 color;
     int pixelIndex;
     int remainingBounces;
+    int hitLight;
 };
 
 // Use with a corresponding PathSegment to do:

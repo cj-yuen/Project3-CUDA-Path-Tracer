@@ -20,8 +20,8 @@
 #include "intersections.h"
 #include "interactions.h"
 
-#define ERRORCHECK 1
-#define SORT_BY_MATERIAL 1  // toggle to make same material contiguous in mem. before shading (1 = sort, 0 = no sort)
+#define ERRORCHECK 0
+#define SORT_BY_MATERIAL 0  // toggle to make same material contiguous in mem. before shading (1 = sort, 0 = no sort)
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -170,6 +170,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
+        segment.hitLight = 0;
     }
 }
 
@@ -257,6 +258,8 @@ __global__ void shadeMaterial(
             return;
         }
 
+        pathSegment.hitLight = 0;
+
 		ShadeableIntersection intersection = shadeableIntersections[idx];
         if (intersection.t > 0.0f) {
 			thrust::default_random_engine rng = makeSeededRandomEngine(iter, pathSegment.pixelIndex, depth);
@@ -267,6 +270,7 @@ __global__ void shadeMaterial(
             if (material.emittance > 0.0f) {
 				pathSegment.color *= (materialColor * material.emittance);
                 pathSegment.remainingBounces = 0;
+                pathSegment.hitLight = 1;
             }
             else {
                 glm::vec3 intersectPoint = pathSegment.ray.origin + intersection.t * pathSegment.ray.direction; 
@@ -342,7 +346,9 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     if (index < nPaths)
     {
         PathSegment iterationPath = iterationPaths[index];
-        image[iterationPath.pixelIndex] += iterationPath.color;
+        if (iterationPath.hitLight) {
+            image[iterationPath.pixelIndex] += iterationPath.color;
+        }
     }
 }
 
