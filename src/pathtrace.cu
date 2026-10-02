@@ -296,6 +296,7 @@ __global__ void computeIntersections(
         int hit_geom_index = -1;    // sphere/cube
         int hit_mesh_index = -1;    // meshes
         bool outside = true;
+        bool hitOutside = true;
 
         glm::vec3 tmp_intersect;
         glm::vec3 tmp_normal;
@@ -324,6 +325,7 @@ __global__ void computeIntersections(
                 hit_geom_index = i;
                 intersect_point = tmp_intersect;
                 normal = tmp_normal;
+                hitOutside = outside;
             }
         }
 
@@ -352,6 +354,7 @@ __global__ void computeIntersections(
                 hit_geom_index = -1;
                 intersect_point = pathSegment.ray.origin + t * pathSegment.ray.direction;
                 normal = meshNormal;
+                hitOutside = meshOutside;
             }
         }
 
@@ -364,6 +367,7 @@ __global__ void computeIntersections(
             // The ray hits something
             intersections[path_index].t = t_min;
             intersections[path_index].surfaceNormal = normal;
+            intersections[path_index].outside = hitOutside;
 
             if (hit_mesh_index >= 0) {
                 intersections[path_index].materialId = meshes[hit_mesh_index].materialid;
@@ -407,7 +411,7 @@ __global__ void shadeMaterial(
             else {
                 glm::vec3 intersectPoint = pathSegment.ray.origin + intersection.t * pathSegment.ray.direction; 
 
-				scatterRay(pathSegment, intersectPoint, intersection.surfaceNormal, material, rng);
+				scatterRay(pathSegment, intersectPoint, intersection.surfaceNormal, material, intersection.outside, rng);
             }
         } else {
             pathSegment.color = glm::vec3(0.0f);

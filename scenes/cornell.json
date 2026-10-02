@@ -27,6 +27,11 @@
             "TYPE":"Specular",
             "RGB":[0.98, 0.98, 0.98],
             "ROUGHNESS":0.0
+        },
+        "glass": {
+            "TYPE": "Refractive",
+            "RGB": [1.0, 1.0, 1.0],
+            "IOR": 1.5
         }
     },
     "Camera":
@@ -88,7 +93,7 @@
         },
         {
             "TYPE":"sphere",
-            "MATERIAL":"specular_white",
+            "MATERIAL":"glass",
             "TRANS":[-1.0,4.0,-1.0],
             "ROTAT":[0.0,0.0,0.0],
             "SCALE":[3.0,3.0,3.0]
