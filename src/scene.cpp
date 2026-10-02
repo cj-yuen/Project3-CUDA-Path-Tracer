@@ -5,6 +5,10 @@
 #include <tiny_obj_loader.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <queue>
+#include <algorithm>
+#include <cfloat>
+
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include "json.hpp"
@@ -31,6 +35,164 @@ Scene::Scene(string filename)
     {
         cout << "Couldn't read from " << filename << endl;
         exit(-1);
+    }
+}
+
+// BVH Construction (CPU)
+namespace {
+    constexpr int BVH_MAX_LEAF = 4;
+    constexpr int BVH_MAX_DEPTH = 64;
+
+    // temp linked-node (during build)
+    struct BVHBuildNode {
+        glm::vec3 bmin, bmax;
+        int triStart = -1;
+        int triCount = 0;
+        int left = -1;
+        int right = -1;
+        bool isLeaf = true;
+    };
+
+    inline glm::vec3 triCentroid(const Triangle& t) {
+        return (t.v0 + t.v1 + t.v2) * (1.f / 3.f);
+    }
+
+    int buildRecursive(std::vector<int>& indices, int start, int end,
+        const std::vector<Triangle>& tris,
+        const std::vector<glm::vec3>& centroids,
+        std::vector<BVHBuildNode>& pool,
+        std::vector<int>& orderedTris,
+        int depth)
+    {
+        int nodeIdx = (int)pool.size();
+        pool.emplace_back();
+
+        // bbox over [start, end)
+        glm::vec3 bmin(FLT_MAX), bmax(-FLT_MAX);
+        for (int i = start; i < end; ++i) {
+            const Triangle& t = tris[indices[i]];
+            bmin = glm::min(bmin, glm::min(t.v0, glm::min(t.v1, t.v2)));
+            bmax = glm::max(bmax, glm::max(t.v0, glm::max(t.v1, t.v2)));
+        }
+
+        int count = end - start;
+
+        if (count <= BVH_MAX_LEAF || depth >= BVH_MAX_DEPTH) {
+            // leaf — write fields via index (no held reference)
+            pool[nodeIdx].isLeaf = true;
+            pool[nodeIdx].bmin = bmin;
+            pool[nodeIdx].bmax = bmax;
+            pool[nodeIdx].triStart = (int)orderedTris.size();
+            pool[nodeIdx].triCount = count;
+
+            for (int i = start; i < end; ++i) {
+                orderedTris.push_back(indices[i]);
+            }
+            return nodeIdx;
+        }
+
+        // split along longest axis of the bbox
+        glm::vec3 extent = bmax - bmin;
+        int axis = 0;
+        if (extent.y > extent.x) {
+            axis = 1;
+        }
+        if (extent.z > extent[axis]) {
+            axis = 2;
+        }
+
+        int mid = start + count / 2;
+        std::nth_element(
+            indices.begin() + start,
+            indices.begin() + mid,
+            indices.begin() + end,
+            [&](int a, int b) { return centroids[a][axis] < centroids[b][axis]; });
+
+        // recurse 1st 
+        int leftIdx = buildRecursive(indices, start, mid, tris, centroids, pool, orderedTris, depth + 1);
+        int rightIdx = buildRecursive(indices, mid, end, tris, centroids, pool, orderedTris, depth + 1);
+
+        // write to current node via index
+        pool[nodeIdx].isLeaf = false;
+        pool[nodeIdx].bmin = bmin;
+        pool[nodeIdx].bmax = bmax;
+        pool[nodeIdx].left = leftIdx;
+        pool[nodeIdx].right = rightIdx;
+        pool[nodeIdx].triStart = -1;
+        pool[nodeIdx].triCount = 0;
+
+        return nodeIdx;
+    }
+
+    std::vector<BVHNode> flattenBVH(const std::vector<BVHBuildNode>& pool, int rootIdx) {
+        std::vector<BVHNode> nodes;
+        nodes.emplace_back();   // slot 0 = root
+
+        std::queue<std::pair<int, int>> q;   // (pool index, flat index)
+        q.push({ rootIdx, 0 });
+
+        int nextChild = 1;
+        while (!q.empty()) {
+            auto [poolIdx, flatIdx] = q.front(); q.pop();
+            const BVHBuildNode& src = pool[poolIdx];
+
+            if (src.isLeaf) {
+                nodes[flatIdx].bboxMin = src.bmin;
+                nodes[flatIdx].bboxMax = src.bmax;
+                nodes[flatIdx].leftFirst = src.triStart;
+                nodes[flatIdx].triCount = src.triCount;
+            } else {
+                int leftFlat = nextChild;
+                int rightFlat = nextChild + 1;
+                nextChild += 2;
+
+                if ((int)nodes.size() < nextChild) {
+                    nodes.resize(nextChild);
+                }
+
+                nodes[flatIdx].bboxMin = src.bmin;
+                nodes[flatIdx].bboxMax = src.bmax;
+                nodes[flatIdx].leftFirst = leftFlat;
+                nodes[flatIdx].triCount = 0;
+
+                q.push({ src.left,  leftFlat });
+                q.push({ src.right, rightFlat });
+            }
+        }
+
+        return nodes;
+    }
+
+    std::vector<BVHNode> buildMeshBVH(const std::vector<Triangle>& tris_in,
+        std::vector<Triangle>& tris_out)
+    {
+        int n = (int)tris_in.size();
+        std::vector<int> indices(n);
+        for (int i = 0; i < n; ++i) {
+            indices[i] = i;
+        }
+
+        std::vector<glm::vec3> centroids(n);
+        for (int i = 0; i < n; ++i) {
+            centroids[i] = triCentroid(tris_in[i]);
+        }
+
+        std::vector<int> orderedTris;
+        orderedTris.reserve(n);
+
+        std::vector<BVHBuildNode> pool;
+        pool.reserve(2 * n / BVH_MAX_LEAF + 16);
+
+        int root = buildRecursive(indices, 0, n, tris_in, centroids, pool, orderedTris, 0);
+        std::vector<BVHNode> nodes = flattenBVH(pool, root);
+
+        // reorder triangles --> leaves reference contiguous ranges
+        tris_out.resize(n);
+        for (int i = 0; i < n; ++i) {
+            tris_out[i] = tris_in[orderedTris[i]];
+        }
+
+        return nodes;
     }
 }
 
@@ -172,6 +334,12 @@ void Scene::loadFromJSON(const std::string& jsonName)
                     index_offset += fv;
                 }
             }
+
+            std::vector<Triangle> reordered;
+            mesh.bvhNodes = buildMeshBVH(mesh.triangles, reordered);
+            mesh.triangles = std::move(reordered);
+
+            std::cout << "BVH: " << mesh.bvhNodes.size() << " nodes for " << mesh.triangles.size() << " triangles" << std::endl;
 
             mesh.bboxMin = bmin;
             mesh.bboxMax = bmax;

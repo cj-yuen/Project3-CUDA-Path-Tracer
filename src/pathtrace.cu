@@ -96,6 +96,7 @@ static int* dev_materialIds = NULL; // material sorting
 static Triangle* dev_triangles = NULL;
 static MeshInfo* dev_meshInfos = NULL;
 static int hst_num_meshes = 0;
+static BVHNode* dev_bvhNodes = NULL;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -128,40 +129,61 @@ void pathtraceInit(Scene* scene)
 
     // flatten all meshes --> triangle array
     int totalTris = 0;
+    int totalBVH = 0;
     for (const auto& m : scene->meshes) {
         totalTris += (int)m.triangles.size();
+        totalBVH += (int)m.bvhNodes.size();
     }
-
     hst_num_meshes = (int)scene->meshes.size();
 
     if (totalTris > 0) {
         std::vector<Triangle> flatTris;
+        std::vector<BVHNode>  flatBVH;
         std::vector<MeshInfo> meshInfos;
         flatTris.reserve(totalTris);
+        flatBVH.reserve(totalBVH);
 
-        int offset = 0;
-        for (const auto& m : scene->meshes){
+        int triOffset = 0;
+        int bvhOffset = 0;
+
+        for (const auto& m : scene->meshes) {
             MeshInfo info;
-            info.triStart = offset;
+            info.triStart = triOffset;
             info.triCount = (int)m.triangles.size();
+            info.bvhStart = bvhOffset;
+            info.bvhCount = (int)m.bvhNodes.size();
             info.materialid = m.materialid;
             info.bboxMin = m.bboxMin;
             info.bboxMax = m.bboxMax;
             meshInfos.push_back(info);
 
-            for (const auto& t : m.triangles) flatTris.push_back(t);
-            offset += (int)m.triangles.size();
+            for (const auto& t : m.triangles) {
+                flatTris.push_back(t);
+            }
+
+            for (const auto& n : m.bvhNodes) {
+                flatBVH.push_back(n);
+            }
+
+            triOffset += (int)m.triangles.size();
+            bvhOffset += (int)m.bvhNodes.size();
         }
 
         cudaMalloc(&dev_triangles, totalTris * sizeof(Triangle));
         cudaMemcpy(dev_triangles, flatTris.data(),
             totalTris * sizeof(Triangle), cudaMemcpyHostToDevice);
 
+        cudaMalloc(&dev_bvhNodes, totalBVH * sizeof(BVHNode));
+        cudaMemcpy(dev_bvhNodes, flatBVH.data(),
+            totalBVH * sizeof(BVHNode), cudaMemcpyHostToDevice);
+
         cudaMalloc(&dev_meshInfos, hst_num_meshes * sizeof(MeshInfo));
         cudaMemcpy(dev_meshInfos, meshInfos.data(),
             hst_num_meshes * sizeof(MeshInfo), cudaMemcpyHostToDevice);
 
-        std::cout << "Uploaded " << totalTris << " triangles from " << hst_num_meshes << " mesh(es) to GPU." << std::endl;
+        std::cout << "Uploaded " << totalTris << " triangles and "
+            << totalBVH << " BVH nodes from "
+            << hst_num_meshes << " mesh(es) to GPU." << std::endl;
     }
 
     checkCUDAError("pathtraceInit");
@@ -183,8 +205,12 @@ void pathtraceFree()
     if (dev_meshInfos) {
         cudaFree(dev_meshInfos);
     }
+    if (dev_bvhNodes) {
+        cudaFree(dev_bvhNodes);
+    }
     dev_triangles = NULL;
     dev_meshInfos = NULL;
+    dev_bvhNodes = NULL;
     hst_num_meshes = 0;
 
     checkCUDAError("pathtraceFree");
@@ -252,6 +278,7 @@ __global__ void computeIntersections(
     Geom* geoms,
     int geoms_size,
     Triangle* triangles,
+    BVHNode* bvhNodes,
     MeshInfo* meshes,
     int num_meshes,
     ShadeableIntersection* intersections)
@@ -311,17 +338,20 @@ __global__ void computeIntersections(
             }
 #endif
 
-            for (int i = 0; i < mesh.triCount; i++){
-                const Triangle& tri = triangles[mesh.triStart + i];
-                t = triangleIntersectionTest(tri, pathSegment.ray,
-                    tmp_intersect, tmp_normal, outside);
-                if (t > 0.0f && t_min > t) {
-                    t_min = t;
-                    hit_mesh_index = m;
-                    hit_geom_index = -1;
-                    intersect_point = tmp_intersect;
-                    normal = tmp_normal;
-                }
+            glm::vec3 meshNormal;
+            bool meshOutside;
+            float t = intersectMeshBVH(
+                bvhNodes + mesh.bvhStart,
+                triangles + mesh.triStart,
+                pathSegment.ray,
+                meshNormal, meshOutside);
+
+            if (t > 0.0f && t < t_min) {
+                t_min = t;
+                hit_mesh_index = m;
+                hit_geom_index = -1;
+                intersect_point = pathSegment.ray.origin + t * pathSegment.ray.direction;
+                normal = meshNormal;
             }
         }
 
@@ -541,6 +571,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_geoms,
             hst_scene->geoms.size(),
             dev_triangles,
+            dev_bvhNodes,
             dev_meshInfos,
             hst_num_meshes,
             dev_intersections

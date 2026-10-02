@@ -83,3 +83,10 @@ __host__ __device__ bool bboxIntersectionTest(
     const glm::vec3& bmin,
     const glm::vec3& bmax,
     const Ray& r);
+
+__host__ __device__ float intersectMeshBVH(
+    const BVHNode* __restrict__ nodes,
+    const Triangle* __restrict__ tris,
+    const Ray& r,
+    glm::vec3& normal,
+    bool& outside);

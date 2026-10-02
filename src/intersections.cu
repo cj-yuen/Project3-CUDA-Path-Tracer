@@ -209,3 +209,50 @@ __host__ __device__ float triangleIntersectionTest(
 
     return t;
 }
+
+__host__ __device__ float intersectMeshBVH(
+    const BVHNode* __restrict__ nodes,
+    const Triangle* __restrict__ tris,
+    const Ray& r,
+    glm::vec3& outNormal,
+    bool& outOutside)
+{
+    float t_min = FLT_MAX;
+
+    // 64 entries for balanced trees 
+    int stack[64];
+    int sp = 0;
+    stack[sp++] = 0;   // root
+
+    while (sp > 0) {
+        int nodeIdx = stack[--sp];
+        const BVHNode& node = nodes[nodeIdx];
+
+        // Ray-AABB reject
+        if (!bboxIntersectionTest(node.bboxMin, node.bboxMax, r)) {
+            continue;
+        }
+
+        if (node.triCount == 0) {
+            // interior --> push both children
+            stack[sp++] = node.leftFirst;
+            stack[sp++] = node.leftFirst + 1;
+        } else {
+            // leaf --> test all triangles in range
+            for (int i = 0; i < node.triCount; ++i) {
+                const Triangle& tri = tris[node.leftFirst + i];
+                glm::vec3 tmpP, tmpN;
+                bool tmpO;
+                float t = triangleIntersectionTest(tri, r, tmpP, tmpN, tmpO);
+
+                if (t > 0.0f && t < t_min) {
+                    t_min = t;
+                    outNormal = tmpN;
+                    outOutside = tmpO;
+                }
+            }
+        }
+    }
+
+    return (t_min < FLT_MAX) ? t_min : -1.0f;
+}

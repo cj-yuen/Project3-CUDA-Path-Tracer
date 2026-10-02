@@ -89,6 +89,13 @@ struct ShadeableIntersection
   int materialId;
 };
 
+struct BVHNode {
+    glm::vec3 bboxMin;
+    int leftFirst;
+    glm::vec3 bboxMax;
+    int triCount;
+};
+
 struct Triangle {
     glm::vec3 v0, v1, v2;
     glm::vec3 n0, n1, n2;
@@ -96,6 +103,7 @@ struct Triangle {
 
 struct TriangleMesh {
     std::vector<Triangle> triangles;
+    std::vector<BVHNode> bvhNodes;
     glm::vec3 bboxMin, bboxMax;
     int materialid;
 };
@@ -103,8 +111,11 @@ struct TriangleMesh {
 struct MeshInfo {
     int triStart;
     int triCount;
+    int bvhStart;
+    int bvhCount;
     int materialid;
-    int _pad;
+    int _pad[3];
     glm::vec3 bboxMin;
     glm::vec3 bboxMax;
 };
+
