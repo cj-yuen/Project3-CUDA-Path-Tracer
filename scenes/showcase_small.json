@@ -1,0 +1,115 @@
+{
+    "Materials": {
+        "light": {
+            "TYPE": "Emitting",
+            "RGB": [1.0,0.95,0.85],
+            "EMITTANCE": 14.0
+        },
+        "wall_white": {
+            "TYPE": "Diffuse",
+            "RGB": [0.78,0.78,0.78]
+        },
+        "wall_red": {
+            "TYPE": "Diffuse",
+            "RGB": [0.65,0.3,0.3]
+        },
+        "wall_green": {
+            "TYPE": "Diffuse",
+            "RGB": [0.3,0.55,0.35]
+        },
+        "mirror": {
+            "TYPE": "Specular",
+            "RGB": [0.98,0.98,0.98],
+            "ROUGHNESS": 0.0
+        },
+        "glass": {
+            "TYPE": "Refractive",
+            "RGB": [1.0,1.0,1.0],
+            "IOR": 1.5
+        },
+        "phone_glossy": {
+            "TYPE": "Specular",
+            "RGB": [0.12,0.12,0.14],
+            "ROUGHNESS": 0.0
+        }
+    },
+    "Camera": {
+        "RES": [1000,800],
+        "FOVY": 17.0,
+        "ITERATIONS": 5000,
+        "DEPTH": 16,
+        "FILE": "iphone_closeup",
+        "EYE": [6.024,-5.663,30.09],
+        "LOOKAT": [-4.0,5.0,-8.0],
+        "UP": [0.0,1.0,0.0],
+        "APERTURE": 0.15,
+        "FOCAL_DISTANCE": 29.0
+    },
+    "Objects": [
+        {
+            "TYPE": "cube",
+            "MATERIAL": "light",
+            "TRANS": [0.0,59.7,0.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [24.0,0.3,24.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_white",
+            "TRANS": [0.0,0.0,0.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [60.0,0.01,60.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_white",
+            "TRANS": [0.0,60.0,0.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [60.0,0.01,60.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_white",
+            "TRANS": [0.0,30.0,-30.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [60.0,60.0,0.01]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_red",
+            "TRANS": [-30.0,30.0,0.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [0.01,60.0,60.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_green",
+            "TRANS": [30.0,30.0,0.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [0.01,60.0,60.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "mirror",
+            "TRANS": [0.0,15.0,-20.0],
+            "ROTAT": [0.0,25.0,0.0],
+            "SCALE": [40.0,30.0,0.5]
+        },
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "glass",
+            "FILE": "../scenes/Cup.obj",
+            "TRANS": [3.0,0.0,-6.0],
+            "ROTAT": [0.0,91.64,0.0],
+            "SCALE": [1.0,1.0,1.0]
+        },
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "phone_glossy",
+            "FILE": "../scenes/iphone.obj",
+            "TRANS": [-3.0,28.8,6.0],
+            "ROTAT": [90.139,0.056,21.793],
+            "SCALE": [0.074,0.074,0.074]
+        }
+    ]
+}

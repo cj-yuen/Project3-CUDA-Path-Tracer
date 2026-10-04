@@ -1,0 +1,173 @@
+{
+    "Materials": {
+        "light": {
+            "TYPE": "Emitting",
+            "RGB": [1.0,0.95,0.85],
+            "EMITTANCE": 5.0
+        },
+        "wall_cool_blue": {
+            "TYPE": "Diffuse",
+            "RGB": [0.48,0.6,0.78]
+        },
+        "wall_cool_blue_dark": {
+            "TYPE": "Diffuse",
+            "RGB": [0.42,0.54,0.72]
+        },
+        "floor_wood": {
+            "TYPE": "Diffuse",
+            "RGB": [0.38,0.25,0.15]
+        },
+        "rug": {
+            "TYPE": "Diffuse",
+            "RGB": [0.5,0.34,0.35]
+        },
+        "ceiling_white": {
+            "TYPE": "Diffuse",
+            "RGB": [0.98,0.98,0.98]
+        },
+        "mirror": {
+            "TYPE": "Specular",
+            "RGB": [0.98,0.98,0.98],
+            "ROUGHNESS": 0.0
+        },
+        "table_gray": {
+            "TYPE": "Diffuse",
+            "RGB": [0.38,0.38,0.38]
+        },
+        "chair_fabric": {
+            "TYPE": "Diffuse",
+            "RGB": [0.25,0.28,0.35]
+        },
+        "laptop_silver": {
+            "TYPE": "Diffuse",
+            "RGB": [0.45,0.47,0.5]
+        },
+        "phone_glossy": {
+            "TYPE": "Specular",
+            "RGB": [0.1,0.1,0.12],
+            "ROUGHNESS": 0.0
+        },
+        "glass": {
+            "TYPE": "Refractive",
+            "RGB": [1.0,1.0,1.0],
+            "IOR": 1.5
+        }
+    },
+    "Camera": {
+        "RES": [1200,900],
+        "FOVY": 27.0,
+        "ITERATIONS": 900,
+        "DEPTH": 6,
+        "FILE": "final_showcase",
+        "EYE": [45.211,-48.381,-111.057],
+        "LOOKAT": [10.0,70.0,65.0],
+        "UP": [0.0,1.0,0.0],
+        "APERTURE": 1.0,
+        "FOCAL_DISTANCE": 218.0
+    },
+    "Objects": [
+        {
+            "TYPE": "cube",
+            "MATERIAL": "light",
+            "TRANS": [0.0,276.0,60.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [200.0,4.0,200.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "floor_wood",
+            "TRANS": [0.0,0.0,40.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [500.0,1.0,520.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "ceiling_white",
+            "TRANS": [0.0,280.0,40.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [500.0,1.0,520.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_cool_blue",
+            "TRANS": [0.0,140.0,300.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [500.0,280.0,1.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_cool_blue",
+            "TRANS": [0.0,140.0,-220.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [500.0,280.0,1.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_cool_blue_dark",
+            "TRANS": [-250.0,140.0,40.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [1.0,280.0,520.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "wall_cool_blue_dark",
+            "TRANS": [250.0,140.0,40.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [1.0,280.0,520.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "rug",
+            "TRANS": [10.0,0.6,40.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [260.0,1.0,220.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "mirror",
+            "TRANS": [-110.0,125.0,298.5],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [150.0,120.0,1.0]
+        },
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "chair_fabric",
+            "FILE": "../scenes/chair.obj",
+            "TRANS": [0.0,0.0,0.0],
+            "ROTAT": [0.0,0.0,0.0],
+            "SCALE": [1.0,1.0,1.0]
+        },
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "table_gray",
+            "FILE": "../scenes/TABLE.obj",
+            "TRANS": [20.336,58.498,65.353],
+            "ROTAT": [0.0,180.0,0.0],
+            "SCALE": [0.256,0.256,0.256]
+        },
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "laptop_silver",
+            "FILE": "../scenes/laptop.obj",
+            "TRANS": [4.552,77.336,72.644],
+            "ROTAT": [0.0,-80.876,0.0],
+            "SCALE": [10.916,10.916,10.916]
+        },
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "glass",
+            "FILE": "../scenes/Cup.obj",
+            "TRANS": [34.398,76.179,49.899],
+            "ROTAT": [0.0,91.64,0.0],
+            "SCALE": [1.0,1.0,1.0]
+        },
+        {
+            "TYPE": "mesh",
+            "MATERIAL": "phone_glossy",
+            "FILE": "../scenes/iphone.obj",
+            "TRANS": [-37.916,105.29,60.506],
+            "ROTAT": [90.139,0.056,21.793],
+            "SCALE": [0.074,0.074,0.074]
+        }
+    ]
+}
