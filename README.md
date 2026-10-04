@@ -8,13 +8,13 @@
 
 ## Final Renders
 <p align="center">
-<img src="img/final_showcase_large_scene.png" >
+<img src="img/final_showcase_large_scene.png">
 </p>
 
 *Final showcase rendered at 1200 x 900 resolution for 900 iterations with a max path depth of 6. Camera aperture of 1.0 with focal distance of 218*
 
 <p align="center">
-<img src="iphone_closeup_231.png">
+<img src="img/iphone_closeup_231.png">
 </p>
 
 *Final showcase rendered at 1000 x 800 resolution for 231 iterations with a max path depth of 6. Camera aperture of 0.15 with focal distance of 29*
