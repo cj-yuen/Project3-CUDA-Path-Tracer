@@ -14,10 +14,10 @@
 *Final showcase rendered at 1200 x 900 resolution for 900 iterations with a max path depth of 6. Camera aperture of 1.0 with focal distance of 218*
 
 <p align="center">
-<img src="img/iphone_closeup_231.png">
+<img src="img/iphone_closeup_612.png">
 </p>
 
-*Final showcase rendered at 1000 x 800 resolution for 231 iterations with a max path depth of 6. Camera aperture of 0.15 with focal distance of 29*
+*Final showcase rendered at 1000 x 800 resolution for 612 iterations with a max path depth of 6. Camera aperture of 0.15 with focal distance of 29*
 
 
 ## Overview
