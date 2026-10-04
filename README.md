@@ -25,7 +25,7 @@ This is a CUDA path tracer that renders globally-illuminated scenes on the GPU. 
 
 Rendering is iterative with each frame producing one sample per pixel. The renderer supports arbitrary OBJ meshes, acceleration structures for cheap ray-scene intersection, dielectric materials with Fresnel, and a thin-lens camera.
 
-## Outline
+## Pipeline
 The renderer is structured as a per-bounce pipeline:
 1. **Ray generation:**  one camera ray per pixel, jittered within the pixel for antialiasing along with optional redirection through a thin lens for depth of field.
 2. **Intersection:** each active ray tested against analytic primitives (spheres, cubes) and against one or more imported triangle meshes via BVH traversal.
@@ -35,7 +35,7 @@ The renderer is structured as a per-bounce pipeline:
 
 ## Core Features
 ### <ins>Diffuse BSDF</ins>
-Diffuse surfaces use cosine-weighted hemisphere sampling. For a Lambertian BRDF `f = albedo \ π` and a cosine-weighted PDF `p(ω) = cos θ / π`, the Monte Carlo weight simplifies to: `weight = f · cos θ / p(ω) = albedo`. The throughput multiplier for a diffuse bounce is therefore just the material's albedo, and the outgoing ray direction is drawn from a cosine-weighted hemisphere around the surface normal. New ray origins are offset along the normal by `1e-3` to avoid self-intersection. 
+Diffuse surfaces use cosine-weighted hemisphere sampling. For a Lambertian BRDF `f = albedo / π` and a cosine-weighted PDF `p(ω) = cos θ / π`, the Monte Carlo weight simplifies to: `weight = f · cos θ / p(ω) = albedo`. The throughput multiplier for a diffuse bounce is therefore just the material's albedo, and the outgoing ray direction is drawn from a cosine-weighted hemisphere around the surface normal. New ray origins are offset along the normal by `1e-3` to avoid self-intersection. 
 
 <p align="center">
 <img alt="lambert_image" src="img/basic_lambert.png" width="45%">
@@ -70,7 +70,7 @@ glm::vec3 pinholeDir = glm::normalize(cam.view
     - cam.right * cam.pixelLength.x * (((float)x + jitterX) - (float)cam.resolution.x * 0.5f) 
     - cam.up * cam.pixelLength.y * (((float)y + jitterY) - (float)cam.resolution.y * 0.5f));
 ```
-Because the RNG is seeded on the iteration number, each frame produces a different jitter pattern and thus the running average over many iterations converges to a smooth, aliasing-free image. Antialiasing cost no additional rays and only requires more iterations to converge.
+Because the RNG is seeded on the iteration number, each frame produces a different jitter pattern and thus the running average over many iterations converges to a smooth, aliasing-free image. Antialiasing costs no additional rays and only requires more iterations to converge.
 
 ### <ins>Radiance/Throughput Separation</ins>
 A path's `color` field accumulates BSDF weights (throughput) at every bounce but only becomes a radiance contribution when the path actually reaches an emissive surface. I added a `hitLight` flag to `PathSegment` that `shadeMaterial` sets only when a path terminates on an emissive hit, and then `finalGather` adds a path to the framebuffer only if that flag is set:
@@ -81,14 +81,14 @@ if (iterationPath.hitLight) {
 ```
 Without this, paths that simply ran out of bounces would still contribute their accumulated throughput as if it were light, producing a subtle brightness bias that grows with bounce depth. 
 
-## Specific Features 
+## Extra Features 
 ### <ins>OBJ Mesh Loading</ins>
 
 <p align="center">
 <img alt="mesh_image" src="img/bvh_(controller).png" width="45%">
 </p>
 
-The scene loader accepts arbitrary geometry imported from Wavefront OBJ files. Meshes are parsed with `tinyobjloader`, transformed into world space on the CPU, and flattened into a single contiguous triangle array for the GPU. The loader handles vertex positions, vertex normals, polygonal faces, and the common OBJ face-index forms (`v`, `v/vt`, `v//vn`, `v/vt/vn`). Polygonal faces are triangulated with a triangle fan. When vertex normals are missing, the loaders fall back to the geometric face normal. Object transformations from the scene file are applied to the imported geometry before rendering. 
+The scene loader accepts arbitrary geometry imported from Wavefront OBJ files. Meshes are parsed with `tinyobjloader`, transformed into world space on the CPU, and flattened into a single contiguous triangle array for the GPU. The loader handles vertex positions, vertex normals, polygonal faces, and the common OBJ face-index forms (`v`, `v/vt`, `v//vn`, `v/vt/vn`). Polygonal faces are triangulated with a triangle fan. When vertex normals are missing, the loader falls back to the geometric face normal. Object transformations from the scene file are applied to the imported geometry before rendering. 
 
 Ray-triangle intersection uses the Möller–Trumbore algorithm, which is self-contained and `__host__ __device__` compatible. Imported triangles participate in both intersection paths: 
 1) **with BVH disabled:** rays test every mesh triangle directly
@@ -171,6 +171,7 @@ The camera uses a thin-lens model. For each primary ray:
 
 When `aperture = 0`, the pinhole behavior is recovered because the lens sample becomes the camera center. A second parameter `FOCAL_DISTANCE` controls which depth is in focus. Setting focal distance to a specific object's distance from the camera makes that object sharp and blurs everything else. 
 
+
 ## Performance Analysis
 All measurements below are from the Release build on the RTX 4090 Laptop listed at the top of this README, with `ERRORCHECK` set to `0` and V-Sync off. The measurements are application-level (`ms/frame` from the ImGui overlay).
 
@@ -180,7 +181,7 @@ After each bounce, terminated paths are removed from the active array. To show w
 | --- | --- | --- | --- | --- |
 | 1 | 522,860 | 81.7% | 632,854 | 98.9% |
 | 2 | 363,121 | 56.7% | 624,962 | 97.7% |
-| 3 | 285,425 | 44.6% | 619,9108 | 96.7% |
+| 3 | 285,425 | 44.6% | 619,108 | 96.7% |
 | 4 | 231,876 | 36.2% | 613,932 | 95.9% |
 | 5 | 189,964 | 29.7% | 609,280 | 95.2% |
 | 6 | 155,490 | 24.3% | 605,147 | 94.6% |
@@ -201,6 +202,13 @@ The active path count drops much more quickly in the open scene. By bounce 7, on
 
 Enabling material sorting more than doubled the frame time on the Cornell box. The scene only has a handful of distinct materials (diffuse red, diffuse green, diffuse white, specular, refractive, emitting) and thus the shading kernel is inexpensive and warp-level divergence is low. The `thrust::sort_by_key` call, launched once per bounce over the active path array, dominates the frame budget with the sort running 8 times per frame. Thus the result is scene-dependent. For example, a scene with dozens of materials and more expensive per-material BSDF evaluation (or with refraction and texture lookups creating large divergent branches), the coherence gain would grow and the sort cost would be covered given more per-ray work.
 
+### <ins>Mesh Loading</ins>
+#### **GPU vs hypothetical CPU Comparison:** 
+The loader itself runs on the CPU (parsing with `tinyobjloader`, transforming vertices, building the triangle array) so the loading phase is already CPU-bound and would be essentially identical on a pure-CPU renderer. The GPU-accelerated part is the intersection phase, where the flattened triangle array is queried once per ray per bounce. On the GPU, this is a massively parallel operation that scales with the number of resident rays. On the CPU, the same triangle tests would run sequentially or across a limited number of threads and the loader's upfront cost would be relatively more significant.
+
+#### **Further Optimization:** 
+The loader currently loads every triangle from every mesh into one flat array. For scenes with many meshes this is fine, but for scenes with many frames (or reloading), caching the parsed geometry between runs would save the parse time. On the intersection side, the loader assumes every triangle is tested with the Möller–Trumbore algorithm. A more efficient path for regular grids or heightfields (common in scanned meshes) would be to store the mesh as a texture and use texture-fetch-based intersection, which the GPU's texture units accelerate. 
+
 ### <ins>BVH Traversal</ins>
 | Scene | BVH OFF | BVH ON | Speedup |
 | --- | --- | --- | --- | 
@@ -209,7 +217,13 @@ Enabling material sorting more than doubled the frame time on the Cornell box. T
 
 <img alt="bvh_chart" src="https://github.com/user-attachments/assets/87d7a315-a06a-4320-a1a5-588c46837649" />
 
-The Cornell box result reflects the expected tradeoff at small primitive counts. With only a handful of primitives, the per-ray work saved by hierarchical culling is smaller than the cost of AABB tests, stack pushes, and additional memory traffic from BVH node reads. The mesh showcase thus shows the opposite. With 366,104 triangles across 5 meshes and a BVH containing 216,741 nodes, the naive path tests every triangle per ray per bounce, the BVH rejects entire subtrees whose AABBs the ray misses. This results showed a 1.78x speedup, confirming that the hierarchical culling does reduce the primitive-intersection work when there is enough geometry to cull. 
+The Cornell box result reflects the expected tradeoff at small primitive counts. With only a handful of primitives, the per-ray work saved by hierarchical culling is smaller than the cost of AABB tests, stack pushes, and additional memory traffic from BVH node reads. The mesh showcase thus shows the opposite. With 366,104 triangles across 5 meshes and a BVH containing 216,741 nodes, the naive path tests every triangle per ray per bounce, the BVH rejects entire subtrees whose AABBs the ray misses. This result showed a 1.78x speedup, confirming that the hierarchical culling does reduce the primitive-intersection work when there is enough geometry to cull. 
+
+#### **GPU vs hypothetical CPU Comparison:** 
+The BVH is an example of an algorithm whose benefit is CPU/GPU invariant: hierarchical culling reduces the number of primitive intersection tests regardless of the underlying processor. On the GPU, traversal uses a per-thread stack, which is divergent across warps (each thread's stack has different contents) and requires careful handling to avoid serialization. On a CPU, the same traversal is a straightforward recursive or iterative loop with no SIMT constraints. The GPU-specific costs are the per-thread stack memory and the warp-divergent node visits; the CPU-specific costs are the overhead of function calls and pointer chasing through the tree. Both platforms benefit when scene complexity is high enough to justify the traversal overhead.
+
+#### **Further Optimization:** 
+The current build uses median split on the longest axis of the node AABB, which is simple and fast to construct but produces trees that are less traversal-efficient than a surface-area-heuristic (SAH) build. Switching to SAH would reduce the number of nodes visited per ray by roughly 20–30% on typical meshes. On the traversal side, the current implementation pushes both children unconditionally — the "test-before-push" optimization tests each child's AABB against the ray before pushing, which reduces stack traffic. Sorting traversal order so the closer child is popped first allows early termination once a closer hit is found.
 
 ### <ins>Refraction and Fresnel</ins>
 | IOR = 1.0 (control) | IOR = 1.5 (glass) |
@@ -223,6 +237,12 @@ At IOR 1.0, the sphere is optically matched with the surrounding medium and so t
 * Schlick Fresnel evaluation with one `powf`
 * stochastic branch
 Relative to the diffuse and specular paths, this is more computation per hit. However, in the Cornell box, the glass sphere occupies a small fraction of the image, so the aggregate effect on frame time is small. The performance effect that is visible is on convergence. The stochastic Fresnel branch and the `1/p` throughput division introduce high variance at low sample counts, which is why the iterative preview window shows fireflies until the accumulated sample count is large enough to average them out. 
+
+#### **GPU vs hypothetical CPU Comparison:** 
+A CPU implementation would perform exactly the same Snell's-law refraction, TIR check, Schlick Fresnel evaluation, and stochastic branch selection. The differences are in execution, not algorithm. On the GPU, adjacent paths in a warp can take the reflect and refract branches independently, producing SIMT divergence where the two branches must be serialized. On the CPU, the same divergence becomes a branch-prediction event, which is comparatively cheap when predictable and expensive when not. The GPU's advantage is processing a large number of per-ray decisions concurrently, which is what the rest of the pipeline already exploits.
+
+#### **Further Optimization:** 
+The most impactful improvements target variance. Russian roulette on throughput would probabilistically terminate low-contribution paths and eliminate much of the firefly noise. Clamping the Fresnel branch probability to a minimum (i.e., `max(fresnel, 0.1)`) bounds the worst-case throughput multiplier at `1/0.1 = 10x` rather than `1/F0 = 25x` at near-normal incidence, without much bias. Direct lighting / next-event estimation would eliminate the fireflies entirely by sampling the light explicitly at each bounce. For realism rather than speed, splitting the IOR into per-channel values would produce chromatic dispersion (rainbow-like refraction) at essentially no additional cost.
 
 ### <ins>Depth of Field</ins> 
 | Pinhole (`APERTURE = 0.0`) | Thin lens (`APERTURE = 0.3`, `FOCAL_DISTANCE = 12.0`) | 
@@ -240,6 +260,12 @@ When the aperture is greater than 0, the ray-generation kernel performs addition
 * 1 subtraction
 * normalization (for new ray direction)
 This cost is negligible as it is a fixed number of floating-point operations per primary ray, before any scene traversal takes place. When the aperture is 0, the lens calculation is skipped entirely. The performance effect is again on convergence. Each iteration now samples a different point on the lens for each pixel, which increases the variance of the primary-ray estimate for any pixel that is out of focus. Reducing that variance requires more samples than the pinhole render at the same noise threshold. In practice, a scene with a large aperture will need 2-4x as many iterations as a pinhole render of the same scene to reach comparable resolution of the blurred regions. 
+
+#### **GPU vs hypothetical CPU Comparison:** 
+The thin-lens camera model is entirely per-pixel and parallel, every primary ray is independent of every other. This is true on both the CPU and the GPU; the difference is throughput. A modern GPU generates primary rays for a million pixels in the time a CPU generates rays for tens of thousands. On a CPU, the same camera model would produce identical images at the same arithmetic cost, just with lower ray throughput. There is no algorithmic difference between the two implementations, only an execution-scale difference.
+
+#### **Further Optimization:** 
+The primary-ray generation kernel is already very cheap, so the meaningful optimizations target the variance introduced by lens sampling. Replacing the uniform random disk sample with a low-discrepancy sequence (Halton or Sobol) indexed by `(pixelIndex, iteration)` would reduce the variance of the depth-of-field estimate for a fixed sample budget. Placing the camera basis vectors in `__constant__` memory would broadcast them to a warp in a single cycle, though the current kernel argument passing is already efficient. If the renderer were extended to support multiple primary rays per pixel, the focal-plane computation could be shared across sub-pixel samples.
 
 ## Build and Run
 The project is built with CMake and Visual Studio 2022 on Windows 11. 
