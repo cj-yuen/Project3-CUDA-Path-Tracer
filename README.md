@@ -26,30 +26,30 @@ This is a CUDA path tracer that renders globally-illuminated scenes on the GPU. 
 Rendering is iterative with each frame producing one sample per pixel. The renderer supports arbitrary OBJ meshes, acceleration structures for cheap ray-scene intersection, dielectric materials with Fresnel, and a thin-lens camera.
 
 ## Outline
-The rendered is structured as a per-bounce pipeline:
+The renderer is structured as a per-bounce pipeline:
 1. **Ray generation:**  one camera ray per pixel, jittered within the pixel for antialiasing along with optional redirection through a thin lens for depth of field.
-2. **Intersection:** each active ray tested against analytic primitives (spheres, cubs) and against one or more imported triangle meshes via BVH traversal.
+2. **Intersection:** each active ray tested against analytic primitives (spheres, cubes) and against one or more imported triangle meshes via BVH traversal.
 3. **Shading & scattering:** the hit material evaluates its BSDF, the path throughput is updated, and a new ray is produced for the next bounce.
 4. **Stream compaction:** terminated and escaped paths are removed from the active path array so later passes operate on smaller working set.
 5. **Final gather:** paths that reach an emissive surface contribute their accumulated throughput to the framebuffer.
 
 ## Core Features
 ### <ins>Diffuse BSDF</ins>
-Diffuse surfaces sue cosine-weighted hemisphere sampling. For a Lambertian BRDF `f = albedo \ π` and a cosine-weighted PDF `p(ω) = cos θ / π`, the Monte Carlo weight simplifies to: `weight = f · cos θ / p(ω) = albedo`. The throughput multiplier for a diffuse bounce is therfore just the material's albedo, and the outgoing ray direction is drawn from a cosine-weighted hemisphere around the surface normal. New ray origins are offset along the normal by `1e-3` to avoid self-intersection. 
+Diffuse surfaces use cosine-weighted hemisphere sampling. For a Lambertian BRDF `f = albedo \ π` and a cosine-weighted PDF `p(ω) = cos θ / π`, the Monte Carlo weight simplifies to: `weight = f · cos θ / p(ω) = albedo`. The throughput multiplier for a diffuse bounce is therefore just the material's albedo, and the outgoing ray direction is drawn from a cosine-weighted hemisphere around the surface normal. New ray origins are offset along the normal by `1e-3` to avoid self-intersection. 
 
 <p align="center">
 <img alt="lambert_image" src="img/basic_lambert.png" width="45%">
 </p>
 
 ### <ins>Specular BSDF</ins>
-Specular surfaces reflect the incoming ray about the surface normal. The throughput is tinted by the material's specular color. Diffuse and specular are treated as disjoin material types (based on the `hasReflective` flag) which avoids the cost of a two-branch Monte Carlo estimator for pure-mirror surfaces.
+Specular surfaces reflect the incoming ray about the surface normal. The throughput is tinted by the material's specular color. Diffuse and specular are treated as disjoint material types (based on the `hasReflective` flag) which avoids the cost of a two-branch Monte Carlo estimator for pure-mirror surfaces.
 
 <p align="center">
 <img alt="specular_image" src="img/specular.png" width="45%">
 </p>
 
 ### <ins>Material-Coherent Ray Reordering</ins>
-After intersection, path segments are sorted by material ID before shading. This groups rays hitting the same material contiguously in memory so that warps are more likely to execute the same shading branch. The sort is implemented via `thrust::sort_by_key` on a zipped iterator of `(PathSegment, ShadeableIntersection)` pairs, keyed on material ID. This feature is toggleable via `#define SORT_BY_MATEIRAL`.
+After intersection, path segments are sorted by material ID before shading. This groups rays hitting the same material contiguously in memory so that warps are more likely to execute the same shading branch. The sort is implemented via `thrust::sort_by_key` on a zipped iterator of `(PathSegment, ShadeableIntersection)` pairs, keyed on material ID. This feature is toggleable via `#define SORT_BY_MATERIAL`.
 
 ### <ins>Stream Compaction</ins>
 Every bounce, rays that have escaped the scene or exhausted their bounce budget are removed from the active path array:
@@ -73,7 +73,7 @@ glm::vec3 pinholeDir = glm::normalize(cam.view
 Because the RNG is seeded on the iteration number, each frame produces a different jitter pattern and thus the running average over many iterations converges to a smooth, aliasing-free image. Antialiasing cost no additional rays and only requires more iterations to converge.
 
 ### <ins>Radiance/Throughput Separation</ins>
-A path's `color` field accumulates BSDF weights (throughput) at every bounce but only becomes a radiance contribution when the path actually reaches an emissive surface. i added a `hitLight` flag to `PathSegment` that `shadeMaterial` sets only when a path terminates on an emissive hit, and then `finalGather` adds a path to the framebuffer only if that flag is set:
+A path's `color` field accumulates BSDF weights (throughput) at every bounce but only becomes a radiance contribution when the path actually reaches an emissive surface. I added a `hitLight` flag to `PathSegment` that `shadeMaterial` sets only when a path terminates on an emissive hit, and then `finalGather` adds a path to the framebuffer only if that flag is set:
 ```cpp
 if (iterationPath.hitLight) {
     image[iterationPath.pixelIndex] += iterationPath.color;
@@ -88,7 +88,7 @@ Without this, paths that simply ran out of bounces would still contribute their 
 <img alt="mesh_image" src="img/bvh_(controller).png" width="45%">
 </p>
 
-The scene loader accepts arbitrary geomtry imported from Wavefront OBJ files. Meshes are parsed with `tinyobjloader`, transformed into world space on the CPU, and flattened into a single contiguous triangle array for the GPU. The loader handles vertex positions, vertex normals, polygonal faces, and the common OBJ face-index forms (`v`, `v/vt`, `v//vn`, `v/vtvn`). Polygonal faces are triangulated with a triangle fan. When vertex normals are missing, the loaders falls back to the geometric face normal. Object transformations from the scene file are applied to the imported geometry before rendering. 
+The scene loader accepts arbitrary geometry imported from Wavefront OBJ files. Meshes are parsed with `tinyobjloader`, transformed into world space on the CPU, and flattened into a single contiguous triangle array for the GPU. The loader handles vertex positions, vertex normals, polygonal faces, and the common OBJ face-index forms (`v`, `v/vt`, `v//vn`, `v/vt/vn`). Polygonal faces are triangulated with a triangle fan. When vertex normals are missing, the loaders fall back to the geometric face normal. Object transformations from the scene file are applied to the imported geometry before rendering. 
 
 Ray-triangle intersection uses the Möller–Trumbore algorithm, which is self-contained and `__host__ __device__` compatible. Imported triangles participate in both intersection paths: 
 1) **with BVH disabled:** rays test every mesh triangle directly
@@ -155,7 +155,7 @@ float fresnel = F0 + (1.0f - F0) * powf(1.0f - cosTheta, 5.0f);
 ```
 The reflected and refracted branches are chosen stochastically with probability `fresnel` and `1 - fresnel` respectively. Each branch's throughput is divided by the probability of taking it. This keeps the estimator unbiased but produces a well-known high-variance artifact of fireflies because the reflected branch can carry a larger multiplier when `fresnel` is close to 0.
 
-**Firefly Suppression:** To bound the variance without breaking the estimator, the throughput multiplier is clamped to a maximum value. This introduces a small bias in the rar-even tail, but the visual result is dramatically cleaner at low sample counts, and the bias decays as more samples accumulate. 
+**Firefly Suppression:** To bound the variance without breaking the estimator, the throughput multiplier is clamped to a maximum value. This introduces a small bias in the rare event tail, but the visual result is dramatically cleaner at low sample counts, and the bias decays as more samples accumulate. 
 
 ### <ins>Physically-Based Depth of Field</ins>
 
@@ -167,7 +167,7 @@ The camera uses a thin-lens model. For each primary ray:
 1. Compute the pinhole ray direction for the pixel, including the antialiasing jitter
 2. Find where that ray intersects the focal plane (at distance `focalDistance` from the camera)
 3. Sample a point on a disk of radius `aperture` perpendicular to the view direction with `r = aperture * sqrt(u01)` so the sample is uniformly distributed over the disk area
-4. Move the ray origin to the sample lens position and aim at the focal point
+4. Move the ray origin to the sampled lens position and aim at the focal point
 
 When `aperture = 0`, the pinhole behavior is recovered because the lens sample becomes the camera center. A second parameter `FOCAL_DISTANCE` controls which depth is in focus. Setting focal distance to a specific object's distance from the camera makes that object sharp and blurs everything else. 
 
@@ -180,7 +180,7 @@ After each bounce, terminated paths are removed from the active array. To show w
 | --- | --- | --- | --- | --- |
 | 1 | 522,860 | 81.7% | 632,854 | 98.9% |
 | 2 | 363,121 | 56.7% | 624,962 | 97.7% |
-| 3 | 285,425 | 44.6% | 619,932 | 96.7% |
+| 3 | 285,425 | 44.6% | 619,9108 | 96.7% |
 | 4 | 231,876 | 36.2% | 613,932 | 95.9% |
 | 5 | 189,964 | 29.7% | 609,280 | 95.2% |
 | 6 | 155,490 | 24.3% | 605,147 | 94.6% |
@@ -212,8 +212,34 @@ Enabling material sorting more than doubled the frame time on the Cornell box. T
 The Cornell box result reflects the expected tradeoff at small primitive counts. With only a handful of primitives, the per-ray work saved by hierarchical culling is smaller than the cost of AABB tests, stack pushes, and additional memory traffic from BVH node reads. The mesh showcase thus shows the opposite. With 366,104 triangles across 5 meshes and a BVH containing 216,741 nodes, the naive path tests every triangle per ray per bounce, the BVH rejects entire subtrees whose AABBs the ray misses. This results showed a 1.78x speedup, confirming that the hierarchical culling does reduce the primitive-intersection work when there is enough geometry to cull. 
 
 ### <ins>Refraction and Fresnel</ins>
+| IOR = 1.0 (control) | IOR = 1.5 (glass) |
+| --- | --- | 
+| <img alt="ior1_image" src="img/ior_1.0.png" /> | <img alt="ior1.5_image" src="img/ior_1.5.png" /> |
+
+At IOR 1.0, the sphere is optically matched with the surrounding medium and so transmitted rays pass through without bending and the sphere becomes nearly invisible (only a faint Fresnel silhouette remains). At IOR 1.5, the sphere bends light like window glass and the Fresnel reflectance brightens the silhouette at grazing angles. The Fresnel branch does add work to the shading kernels:
+* `eta` selection based on entering/exiting flag
+* `glm::refract` call
+* total-internal-reflection check
+* Schlick Fresnel evaluation with one `powf`
+* stochastic branch
+Relative to the diffuse and specular paths, this is more computation per hit. However, in the Cornell box, the glass sphere occupies a small fraction of the image, so the aggregate effect on frame time is small. The performance effect that is visible is on convergence. The stochastic Fresnel branch and the `1/p` throughput division introduce high variance at low sample counts, which is why the iterative preview window shows fireflies until the accumulated sample count is large enough to average them out. 
 
 ### <ins>Depth of Field</ins> 
+| Pinhole (`APERTURE = 0.0`) | Thin lens (`APERTURE = 0.3`, `FOCAL_DISTANCE = 12.0`) | 
+| --- | --- | 
+| <img alt="pinhole_image" src="img/dof_pinhole.png" /> | <img alt="thin_lens_image" src="img/dof_thin_lens.png" />
+
+| `FOCAL_DISTANCE = 12.0` | `FOCAL_DISTANCE = 9.0` | 
+| --- | --- | 
+| <img alt="focus_far_image" src="img/dof_thin_lens.png" /> | <img alt="focus_near_image" src="img/dof_focus_near.png" />
+
+When the aperture is greater than 0, the ray-generation kernel performs additional work per pixel:
+* `sqrt()`
+* `sincos` equivalent pair for the disk sample
+* 2 multiplies (for lens offset)
+* 1 subtraction
+* normalization (for new ray direction)
+This cost is negligible as it is a fixed number of floating-point operations per primary ray, before any scene traversal takes place. When the aperture is 0, the lens calculation is skipped entirely. The performance effect is again on convergence. Each iteration now samples a different point on the lens for each pixel, which increases the variance of the primary-ray estimate for any pixel that is out of focus. Reducing that variance requires more samples than the pinhole render at the same noise threshold. In practice, a scene with a large aperture will need 2-4x as many iterations as a pinhole render of the same scene to reach comparable resolution of the blurred regions. 
 
 ## Build and Run
 The project is built with CMake and Visual Studio 2022 on Windows 11. 
@@ -268,3 +294,12 @@ The project is built with CMake and Visual Studio 2022 on Windows 11.
 ## Third-Party Assets
 * `tiny_obj_loader.h` — single-header [Wavefront OBJ parser](https://github.com/tinyobjloader/tinyobjloader)
 
+The following 3D models were used for educational, non-commercial purposes in this project:
+*   Cup — [free3d.com/3d-model/cup-933734.html](https://free3d.com/3d-model/cup-933734.html)
+*   Xbox One Controller — [free3d.com/3d-model/xbox-one-controller-295065.html](https://free3d.com/3d-model/xbox-one-controller-295065.html)
+*   Desk Table — [free3d.com/3d-model/desk-table-184801.html](https://free3d.com/3d-model/desk-table-184801.html)
+*   iPhone X — [free3d.com/3d-model/iphonex-113534.html](https://free3d.com/3d-model/iphonex-113534.html)
+*   Modern Chair — [free3d.com/3d-model/modern-chair-11-82258.html](https://free3d.com/3d-model/modern-chair-11-82258.html)
+*   Notebook (Low Poly) — [free3d.com/3d-model/notebook-low-poly-version-57341.html](https://free3d.com/3d-model/notebook-low-poly-version-57341.html)
+*   Razer Kraken V2 Headphones — [free3d.com/3d-model/razer-kraken-v2-headphones-219.html](https://free3d.com/3d-model/razer-kraken-v2-headphones-219.html)
+*   Computer Mouse V3 — [free3d.com/3d-model/computer-mouse-v3--595560.html](https://free3d.com/3d-model/computer-mouse-v3--595560.html)
