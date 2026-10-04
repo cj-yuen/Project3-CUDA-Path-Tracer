@@ -8,13 +8,13 @@
 
 ## Final Renders
 <p align="center">
-<img src="img/final_showcase_large_scene.png">
+<img alt="big_room_final_render" src="img/final_showcase_large_scene.png">
 </p>
 
 *Final showcase rendered at 1200 x 900 resolution for 900 iterations with a max path depth of 6. Camera aperture of 1.0 with focal distance of 218*
 
 <p align="center">
-<img src="img/iphone_closeup_612.png">
+<img alt="zoomed_in_phone_render" src="img/iphone_closeup_612.png">
 </p>
 
 *Final showcase rendered at 1000 x 800 resolution for 612 iterations with a max path depth of 6. Camera aperture of 0.15 with focal distance of 29*
@@ -38,14 +38,14 @@ The rendered is structured as a per-bounce pipeline:
 Diffuse surfaces sue cosine-weighted hemisphere sampling. For a Lambertian BRDF `f = albedo \ π` and a cosine-weighted PDF `p(ω) = cos θ / π`, the Monte Carlo weight simplifies to: `weight = f · cos θ / p(ω) = albedo`. The throughput multiplier for a diffuse bounce is therfore just the material's albedo, and the outgoing ray direction is drawn from a cosine-weighted hemisphere around the surface normal. New ray origins are offset along the normal by `1e-3` to avoid self-intersection. 
 
 <p align="center">
-<img src="img/basic_lambert.png" width="45%">
+<img alt="lambert_image" src="img/basic_lambert.png" width="45%">
 </p>
 
 ### <ins>Specular BSDF</ins>
 Specular surfaces reflect the incoming ray about the surface normal. The throughput is tinted by the material's specular color. Diffuse and specular are treated as disjoin material types (based on the `hasReflective` flag) which avoids the cost of a two-branch Monte Carlo estimator for pure-mirror surfaces.
 
 <p align="center">
-<img src="img/specular.png" width="45%">
+<img alt="specular_image" src="img/specular.png" width="45%">
 </p>
 
 ### <ins>Material-Coherent Ray Reordering</ins>
@@ -85,7 +85,7 @@ Without this, paths that simply ran out of bounces would still contribute their 
 ### <ins>OBJ Mesh Loading</ins>
 
 <p align="center">
-<img src="img/bvh_(controller).png" width="45%">
+<img alt="mesh_image" src="img/bvh_(controller).png" width="45%">
 </p>
 
 The scene loader accepts arbitrary geomtry imported from Wavefront OBJ files. Meshes are parsed with `tinyobjloader`, transformed into world space on the CPU, and flattened into a single contiguous triangle array for the GPU. The loader handles vertex positions, vertex normals, polygonal faces, and the common OBJ face-index forms (`v`, `v/vt`, `v//vn`, `v/vtvn`). Polygonal faces are triangulated with a triangle fan. When vertex normals are missing, the loaders falls back to the geometric face normal. Object transformations from the scene file are applied to the imported geometry before rendering. 
@@ -138,7 +138,7 @@ while (sp > 0) {
 ### <ins>Refraction and Fresnel</ins>
 
 <p align="center">
-<img src="img/fresnel_refraction_(2.0_max).png" width="45%">
+<img alt="fresnel_image" src="img/fresnel_refraction_(2.0_max).png" width="45%">
 </p>
 
 Refractive materials use a dielectric model with Snell's law and Fresnel reflectance. During shading, I determine whether the ray is entering or exiting the material from the intersection's `outside` flag and pick the corresponding index-of-refraction ratio:
@@ -160,7 +160,7 @@ The reflected and refracted branches are chosen stochastically with probability 
 ### <ins>Physically-Based Depth of Field</ins>
 
 <p align="center">
-<img src="img/dof.png" width="45%">
+<img alt="dof_image" src="img/dof.png" width="45%">
 </p>
 
 The camera uses a thin-lens model. For each primary ray:
@@ -175,10 +175,41 @@ When `aperture = 0`, the pinhole behavior is recovered because the lens sample b
 All measurements below are from the Release build on the RTX 4090 Laptop listed at the top of this README, with `ERRORCHECK` set to `0` and V-Sync off. The measurements are application-level (`ms/frame` from the ImGui overlay).
 
 ### <ins>Stream Compaction</ins>
+After each bounce, terminated paths are removed from the active array. To show what this means for the working set, I recorded the active path count immediately after compaction at each bounce. I compared the provided open Cornell scene against a closed Cornell scene, which adds a front wall that seals the box and forces escaping rays to continue bouncing.
+| Bounce | Open Cornell | Open (% of Pixels) | Closed Cornell | Closed (% of Pixels) |
+| --- | --- | --- | --- | --- |
+| 1 | 522,860 | 81.7% | 632,854 | 98.9% |
+| 2 | 363,121 | 56.7% | 624,962 | 97.7% |
+| 3 | 285,425 | 44.6% | 619,932 | 96.7% |
+| 4 | 231,876 | 36.2% | 613,932 | 95.9% |
+| 5 | 189,964 | 29.7% | 609,280 | 95.2% |
+| 6 | 155,490 | 24.3% | 605,147 | 94.6% |
+| 7 | 127,613 | 19.9% | 601,519 | 94.0% |
+| 8 | 0 | 0% | 0 | 0% |
+
+<img alt="stream_compaction_chart" src="https://github.com/user-attachments/assets/2b1321f7-b22d-46a2-af9e-d3c250c753d8" />
+
+The active path count drops much more quickly in the open scene. By bounce 7, only 19.9% of the original primary rays are still active in the open Cornell box, while 94.0% are still active in the closed version. The open scene allows rays to escape through the camera-side opening, so paths terminate after a small number of bounces. The closed scene adds a front wall that seals the box, forcing nearly every ray to keep bouncing until it hits the light or exhausts its bounce budget. Stream compaction is therefore most beneficial in scenes where paths terminate early.
 
 ### <ins>Material Sorting</ins>
+| SORT_BY_MATERIAL | Frame Time | FPS | Comparison |  
+| --- | --- | --- | --- |
+| 0 (OFF) | 18.622 ms | 53.7 | baseline |
+| 1 (ON) | 42.373 ms | 23.6 | 2.28x slower |
+
+<img alt="material_sorting_chart" src="https://github.com/user-attachments/assets/d5c28586-d7aa-4080-a029-bf1a314796b3" />
+
+Enabling material sorting more than doubled the frame time on the Cornell box. The scene only has a handful of distinct materials (diffuse red, diffuse green, diffuse white, specular, refractive, emitting) and thus the shading kernel is inexpensive and warp-level divergence is low. The `thrust::sort_by_key` call, launched once per bounce over the active path array, dominates the frame budget with the sort running 8 times per frame. Thus the result is scene-dependent. For example, a scene with dozens of materials and more expensive per-material BSDF evaluation (or with refraction and texture lookups creating large divergent branches), the coherence gain would grow and the sort cost would be covered given more per-ray work.
 
 ### <ins>BVH Traversal</ins>
+| Scene | BVH OFF | BVH ON | Speedup |
+| --- | --- | --- | --- | 
+| Cornell box (few primitives) | 18.315 ms | 18.975 ms | 0.97x slower |
+| Mesh showcase (366,104 triangles) | 2,178.863 ms | 1,225.253 ms | 1.78x faster |
+
+<img alt="bvh_chart" src="https://github.com/user-attachments/assets/87d7a315-a06a-4320-a1a5-588c46837649" />
+
+The Cornell box result reflects the expected tradeoff at small primitive counts. With only a handful of primitives, the per-ray work saved by hierarchical culling is smaller than the cost of AABB tests, stack pushes, and additional memory traffic from BVH node reads. The mesh showcase thus shows the opposite. With 366,104 triangles across 5 meshes and a BVH containing 216,741 nodes, the naive path tests every triangle per ray per bounce, the BVH rejects entire subtrees whose AABBs the ray misses. This results showed a 1.78x speedup, confirming that the hierarchical culling does reduce the primitive-intersection work when there is enough geometry to cull. 
 
 ### <ins>Refraction and Fresnel</ins>
 
